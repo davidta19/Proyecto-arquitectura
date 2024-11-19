@@ -1,0 +1,78 @@
+;******************************************
+; BOOTLOADER.ASM
+; 
+;******************************************
+-
+; Se carga en la dirección de memoria 0x7C00 por el BIOS
+[org 0x7c00]      ; Indica al ensamblador dónde se cargará este código
+[bits 16]         ; Indica que estamos en modo real (16 bits)
+
+;----------------------------------------
+; INICIALIZACIÓN DE SEGMENTOS
+;----------------------------------------
+init_segments:
+    cli                     ; Deshabilita interrupciones durante la configuración
+    xor ax, ax             ; Limpia AX (pone a 0)
+    mov ds, ax             ; Inicializa Data Segment
+    mov es, ax             ; Inicializa Extra Segment
+    mov ss, ax             ; Inicializa Stack Segment
+    mov sp, 0x7c00         ; Configura Stack Pointer justo debajo del bootloader
+    sti                    ; Rehabilita interrupciones
+
+;----------------------------------------
+; CARGA DEL KERNEL
+;----------------------------------------
+load_kernel:
+    mov ah, 0x02           ; Función BIOS: leer sectores del disco
+    mov al, 1              ; Número de sectores a leer
+    mov ch, 0              ; Número de cilindro
+    mov cl, 2              ; Número de sector (2 porque el bootloader está en el 1)
+    mov dh, 0              ; Número de cabeza
+    mov dl, 0              ; Número de drive (0 = floppy A:)
+    mov bx, 0x1000         ; Segmento donde cargaremos el kernel
+    mov es, bx
+    xor bx, bx             ; Offset dentro del segmento
+
+    int 0x13               ; Llamada a BIOS para leer disco
+    jc disk_error          ; Si hay error (carry flag = 1), saltar a manejo de error
+
+;----------------------------------------
+; SALTO AL KERNEL
+;----------------------------------------
+    jmp 0x1000:0x0000      ; Salto far (segmento:offset) al kernel
+
+;----------------------------------------
+; RUTINAS DE MANEJO DE ERROR
+;----------------------------------------
+disk_error:
+    mov si, error_msg      ; Carga dirección del mensaje de error
+    call print_string      ; Llama a rutina de impresión
+    jmp $                  ; Loop infinito
+
+;----------------------------------------
+; RUTINA DE IMPRESIÓN
+; Entrada: SI = puntero a string terminado en 0
+;----------------------------------------
+print_string:
+    pusha                  ; Guarda todos los registros
+.loop:
+    mov ah, 0x0E          ; Función BIOS: modo TTY
+    lodsb                 ; Carga siguiente carácter en AL
+    or al, al             ; Verifica si es 0 (fin de string)
+    jz .done              ; Si es 0, termina
+    int 0x10              ; Llamada BIOS para imprimir carácter
+    jmp .loop             ; Siguiente carácter
+.done:
+    popa                  ; Restaura registros
+    ret
+
+;----------------------------------------
+; DATOS
+;----------------------------------------
+error_msg db 'Error loading kernel', 0
+
+;----------------------------------------
+; RELLENO Y FIRMA DE BOOT
+;----------------------------------------
+    times 510-($-$$) db 0   ; Rellena con 0s hasta byte 510
+    dw 0xAA55               ; Firma de boot en últimos 2 bytes
