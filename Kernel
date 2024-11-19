@@ -1,0 +1,202 @@
+;******************************************
+; KERNEL.ASM
+;******************************************
+[org 0x0000]      ; El kernel se cargará en el offset 0 del segmento 0x1000
+[bits 16]         ; Continuamos en modo real (16 bits)
+
+;----------------------------------------
+; PUNTO DE ENTRADA DEL KERNEL
+;----------------------------------------
+kernel_start:
+    ; Configuración inicial de segmentos
+    mov ax, cs             ; Configura todos los segmentos para que sean iguales
+    mov ds, ax             ; al Code Segment
+    mov es, ax
+    mov ss, ax
+    mov sp, 0xFFFF         ; Stack Pointer al final del segmento
+
+    ; Inicializa el stack de cadenas
+    mov word [stack_top], 0 ; Inicializa el top del stack en 0
+
+    call clear_screen      ; Limpia la pantalla al iniciar
+
+;----------------------------------------
+; LOOP PRINCIPAL DEL MENÚ
+;----------------------------------------
+menu_loop:
+    call display_menu      ; Muestra opciones del menú
+    call get_choice        ; Obtiene elección del usuario
+    
+    ; Compara la elección y salta a la rutina correspondiente
+    cmp al, '1'
+    je read_string_option
+    cmp al, '2'
+    je write_strings_option
+    cmp al, '0'
+    je exit_program
+    
+    jmp menu_loop          ; Si no es opción válida, vuelve a mostrar menú
+
+;----------------------------------------
+; RUTINA DE MOSTRAR MENÚ
+;----------------------------------------
+display_menu:
+    mov si, menu_msg
+    call print_string
+    ret
+
+;----------------------------------------
+; RUTINA DE LEER CADENA Y GUARDARLA EN STACK
+;----------------------------------------
+read_string_option:
+    call clear_screen
+    mov si, input_prompt   ; Muestra prompt
+    call print_string
+    
+    mov di, buffer         ; DI apunta al buffer de entrada
+    mov cx, 0              ; Contador de caracteres
+    
+input_loop:
+    mov ah, 0x00          ; Función BIOS: esperar tecla
+    int 0x16              ; Interrupción de teclado
+    
+    cmp al, 0x0D          ; ¿Es Enter?
+    je finish_input
+    
+    cmp cx, 31            ; ¿Alcanzó máximo de caracteres?
+    je input_loop         ; Si sí, ignora entrada
+    
+    mov ah, 0x0E          ; Eco del carácter
+    int 0x10
+    
+    stosb                 ; Almacena carácter en buffer
+    inc cx
+    jmp input_loop
+    
+finish_input:
+    mov al, 0             ; Termina string con null
+    stosb
+    
+    ; Guarda la cadena en el stack
+    call push_string
+    
+    mov si, newline
+    call print_string
+    jmp menu_loop
+
+;----------------------------------------
+; RUTINA DE MOSTRAR CADENAS DEL STACK
+;----------------------------------------
+write_strings_option:
+    call clear_screen
+    mov si, stored_msg
+    call print_string
+    
+    ; Muestra las cadenas almacenadas en el stack
+    call show_strings
+    
+    mov si, press_key
+    call print_string
+    
+    mov ah, 0x00         ; Espera tecla para continuar
+    int 0x16
+    jmp menu_loop
+
+;----------------------------------------
+; RUTINAS DE MANEJO DE STACK DE CADENAS
+;----------------------------------------
+; Apila una cadena en el stack
+push_string:
+    pusha
+    mov si, buffer
+    mov di, [stack_top]
+    shl di, 5             ; Multiplica por 32 (tamaño buffer)
+    add di, strings_stack ; Apunta a la posición del stack
+    
+    mov cx, 32            ; Copia 32 bytes (max length de cadena)
+    rep movsb             ; Copia la cadena al stack
+    
+    inc word [stack_top]  ; Incrementa el top del stack
+    popa
+    ret
+
+; Muestra las cadenas almacenadas en el stack
+show_strings:
+    pusha
+    xor bx, bx             ; Inicializa contador de cadenas en 0
+.loop:
+    cmp bx, [stack_top]    ; ¿Llegó al final del stack?
+    je .done
+    
+    mov si, bx             ; Copia el índice a SI
+    shl si, 5              ; Multiplica por 32 (tamaño buffer)
+    add si, strings_stack  ; Apunta a la posición de la cadena en el stack
+    call print_string
+    
+    mov si, newline        ; Imprime newline entre cadenas
+    call print_string
+    
+    inc bx                 ; Siguiente cadena en el stack
+    jmp .loop
+.done:
+    popa
+    ret
+
+;----------------------------------------
+; RUTINAS DE UTILIDAD
+;----------------------------------------
+; Imprime string terminado en 0
+print_string:
+    pusha
+    mov ah, 0x0E
+.loop:
+    mov al, [si]
+    or al, al            ; ¿Fin de string?
+    jz .done
+    int 0x10
+    inc si
+    jmp .loop
+.done:
+    popa
+    ret
+
+; Limpia la pantalla
+clear_screen:
+    pusha
+    mov ah, 0x00         ; Función BIOS: set video mode
+    mov al, 0x03         ; Modo texto 80x25
+    int 0x10
+    popa
+    ret
+
+; Lee una tecla
+get_choice:
+    mov ah, 0x00
+    int 0x16
+    ret
+
+; Termina el programa
+exit_program:
+    cli                  ; Deshabilita interrupciones
+    hlt                  ; Detiene el CPU
+
+;----------------------------------------
+; DATOS
+;----------------------------------------
+menu_msg db 'Simple OS Menu', 0x0D, 0x0A
+        db '1. Escribir cadenas', 0x0D, 0x0A
+        db '2. Mostrar cadenas', 0x0D, 0x0A
+        db '0. Salir', 0x0D, 0x0A
+        db 'Choose an option: ', 0
+
+input_prompt db 'Enter a string (max 32 chars): ', 0
+stored_msg db 'Stored strings:', 0x0D, 0x0A, 0
+press_key db 0x0D, 0x0A, 'Press any key to continue...', 0
+newline db 0x0D, 0x0A, 0
+
+; Buffer para almacenar la entrada (32 caracteres + terminador null)
+buffer times 33 db 0
+
+; Stack de cadenas (32 cadenas de 32 caracteres cada una)
+stack_top dw 0
+strings_stack times 32 * 32 db 0
