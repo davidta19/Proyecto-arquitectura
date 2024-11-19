@@ -1,0 +1,20 @@
+: OS_floppy.img
+
+OS_floppy.img: bootloader.bin kernel.bin
+    # Crear una imagen de disquete vacía de 1.44MB
+		dd if=/dev/zero of=OS_floppy.img bs=512 count=2880
+    # Escribir el bootloader en el primer sector
+		dd conv=notrunc if=bootloader.bin of=OS_floppy.img bs=512 count=1 seek=0
+
+    # Escribir el kernel en el segundo sector
+		dd conv=notrunc if=kernel.bin of=OS_floppy.img bs=512 count=1 seek=1
+
+bootloader.bin: bootloader.asm 
+	#vamos a generar un archivo bootloader, bootloader.bin es la firma de la función y es lo que se busca en la primera funcion
+		nasm -f bin bootloader.asm -o bootloader.bin
+
+kernel.bin: kernel.asm
+		nasm -f bin kernel.asm -o kernel.bin
+	@echo "Cleaning up..."
+clean:
+		rm -f *.bin OS_floppy.img
